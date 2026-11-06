@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Start / stop / status the s2.cpp HTTP server on macOS (Metal build).
+# Start / stop / status the s2.cpp HTTP server (Metal on macOS by default;
+# CUDA, Vulkan or CPU selectable with S2_BACKEND).
 #
 # Usage:
 #   scripts/s2-service.sh start      # build if needed, then start in background
@@ -13,6 +14,7 @@
 #   S2_TOKENIZER  path to tokenizer    (default: <repo>/tokenizer.json)
 #   S2_PORT       HTTP port            (default: 13030)
 #   S2_LOG_DIR    log directory        (default: ~/Library/Logs/s2cpp)
+#   S2_BACKEND    metal|cuda|vulkan|cpu (default: metal)
 
 set -euo pipefail
 
@@ -24,6 +26,7 @@ BIN="$BUILD_DIR/s2"
 MODEL="${S2_MODEL:-$HOME/personal/Hibiki/s2cpp/models/s2-pro-q4_k_m.gguf}"
 TOKENIZER="${S2_TOKENIZER:-$REPO_DIR/tokenizer.json}"
 PORT="${S2_PORT:-13030}"
+BACKEND="${S2_BACKEND:-metal}"
 LOG_DIR="${S2_LOG_DIR:-$HOME/Library/Logs/s2cpp}"
 PID_FILE="$LOG_DIR/s2.pid"
 LOG_FILE="$LOG_DIR/s2.log"
@@ -31,14 +34,28 @@ LOG_FILE="$LOG_DIR/s2.log"
 log() { printf '[s2] %s\n' "$*"; }
 die() { printf '[s2] error: %s\n' "$*" >&2; exit 1; }
 
+ncpu() {
+    sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4
+}
+
 build() {
     cd "$REPO_DIR"
-    if [[ ! -f "$BUILD_DIR/CMakeCache.txt" ]]; then
-        log "configuring (Metal, Release)..."
-        cmake -B build -DCMAKE_BUILD_TYPE=Release -DS2_METAL=ON
-    fi
+    local flags
+    case "$BACKEND" in
+        metal)  flags="-DS2_METAL=ON" ;;
+        cuda)   flags="-DS2_CUDA=ON" ;;
+        vulkan) flags="-DS2_VULKAN=ON" ;;
+        cpu)    flags="" ;;
+        *)      die "unknown S2_BACKEND '$BACKEND' (expected metal, cuda, vulkan or cpu)" ;;
+    esac
+    # Always configure: cmake reuses the cache, and this lets switching backends
+    # take effect. Explicitly turn the other backends off so stale cache entries
+    # from a previous configure cannot leave two backends enabled at once.
+    log "configuring ($BACKEND, Release)..."
+    cmake -B build -DCMAKE_BUILD_TYPE=Release \
+        -DS2_METAL=OFF -DS2_CUDA=OFF -DS2_VULKAN=OFF $flags
     log "building..."
-    cmake --build build --parallel "$(sysctl -n hw.ncpu)"
+    cmake --build build --parallel "$(ncpu)"
 }
 
 is_running() {
