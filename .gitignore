@@ -21,3 +21,5 @@ ref_text.*
 /voices
 /s2-pro/
 ggml
+models
+audio

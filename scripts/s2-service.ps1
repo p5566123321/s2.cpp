@@ -27,6 +27,11 @@ $ErrorActionPreference = 'Stop'
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoDir   = Split-Path -Parent $ScriptDir
 
+# Optional scripts\env.ps1 sets the S2_* overrides (e.g. `$env:S2_MODEL = '...'`).
+# It is dot-sourced so the variables land in this process's environment.
+$EnvFile = Join-Path $ScriptDir 'env.ps1'
+if (Test-Path $EnvFile -PathType Leaf) { . $EnvFile }
+
 function Get-Setting([string]$Name, [string]$Default) {
     $value = [Environment]::GetEnvironmentVariable($Name)
     if ([string]::IsNullOrEmpty($value)) { return $Default }
@@ -63,7 +68,8 @@ function Get-BackendFlag {
 
 function Build-Server {
     $cmakeArgs = @('-B', 'build', '-DCMAKE_BUILD_TYPE=Release',
-                   '-DS2_METAL=OFF', '-DS2_CUDA=OFF', '-DS2_VULKAN=OFF')
+                   '-DS2_METAL=OFF', '-DS2_CUDA=OFF', '-DS2_VULKAN=OFF',
+                   '-DGGML_CCACHE=OFF')
     $flag = Get-BackendFlag
     if ($flag) { $cmakeArgs += $flag }
 
