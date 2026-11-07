@@ -1098,6 +1098,12 @@ bool Pipeline::synthesize_streaming_prompt_codes_locked(const PipelineParams & p
     };
 
     GenerateParams gen_params = params.gen;
+    {
+        auto outer_cancel = params.gen.should_cancel;
+        gen_params.should_cancel = [&sink, outer_cancel]() {
+            return sink.is_cancelled() || (outer_cancel && outer_cancel());
+        };
+    }
     gen_params.on_frame = [&](const FrameCallbackData & fcd) -> bool {
         if (sink.is_cancelled()) {
             stream_aborted = true;

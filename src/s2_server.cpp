@@ -227,7 +227,8 @@ static bool synthesize_segmented_to_sink(s2::Pipeline & pipeline,
     std::vector<float> pause_pcm(pause_samples, 0.0f);
 
     for (size_t i = 0; i < segments.size(); ++i) {
-        if (sink.is_cancelled()) {
+        if (sink.is_cancelled() ||
+            (base_params.gen.should_cancel && base_params.gen.should_cancel())) {
             return false;
         }
 
@@ -507,6 +508,13 @@ namespace s2
                 }
 
                 pipelineParams.text = req.form.get_field("text");
+                if (std::all_of(pipelineParams.text.begin(), pipelineParams.text.end(),
+                                [](unsigned char c) { return std::isspace(c) != 0; })) {
+                    json err = { {"error", "Text must contain non-whitespace characters"} };
+                    res.set_content(err.dump(), "application/json");
+                    res.status = 400;
+                    return;
+                }
 
                 pipelineParams.prompt_text = get_first_form_field(
                     req.form, {"reference_text", "ref_text", "prompt_text"});
@@ -524,6 +532,34 @@ namespace s2
                             res.set_content(err.dump(), "application/json");
                             res.status = 400;
                             return;
+                        }
+
+                        {
+                            std::string range_error;
+                            if (j.contains("max_new_tokens")) {
+                                const int32_t v = j["max_new_tokens"].get<int32_t>();
+                                if (v < 1 || v > 4096) range_error = "max_new_tokens must be in [1, 4096]";
+                            }
+                            if (range_error.empty() && j.contains("temperature")) {
+                                const float v = j["temperature"].get<float>();
+                                if (!(v >= 0.0f && v <= 5.0f)) range_error = "temperature must be in [0, 5]";
+                            }
+                            if (range_error.empty() && j.contains("top_p")) {
+                                const float v = j["top_p"].get<float>();
+                                if (!(v > 0.0f && v <= 1.0f)) range_error = "top_p must be in (0, 1]";
+                            }
+                            if (range_error.empty() && j.contains("top_k")) {
+                                if (j["top_k"].get<int32_t>() < 0) range_error = "top_k must be >= 0";
+                            }
+                            if (range_error.empty() && j.contains("min_tokens_before_end")) {
+                                if (j["min_tokens_before_end"].get<int32_t>() < 0) range_error = "min_tokens_before_end must be >= 0";
+                            }
+                            if (!range_error.empty()) {
+                                json err = { {"error", range_error} };
+                                res.set_content(err.dump(), "application/json");
+                                res.status = 400;
+                                return;
+                            }
                         }
 
                         if (j.contains("max_new_tokens")) {
@@ -666,6 +702,34 @@ namespace s2
                 }
 
                 apply_voice_selection(pipelineParams, voice_value, voice_dir_value);
+
+                if (!pipelineParams.voice_id.empty()) {
+                    const std::string & vid = pipelineParams.voice_id;
+                    const bool unsafe = vid.find_first_of("/\\:") != std::string::npos ||
+                                        vid.find("..") != std::string::npos ||
+                                        std::any_of(vid.begin(), vid.end(),
+                                                    [](unsigned char c) { return c < 0x20 || c == 0x7f; });
+                    if (unsafe) {
+                        json err = { {"error", "Invalid voice id"} };
+                        res.set_content(err.dump(), "application/json");
+                        res.status = 400;
+                        return;
+                    }
+                    std::error_code ec;
+                    const fs::path profile = fs::path(pipelineParams.voice_storage_dir) / (vid + ".s2voice");
+                    if (!fs::exists(profile, ec)) {
+                        json err = { {"error", "Voice profile not found: " + vid} };
+                        res.set_content(err.dump(), "application/json");
+                        res.status = 404;
+                        return;
+                    }
+                }
+
+                // Abort generation when the client disconnects (sync paths; the
+                // streaming sink handles its own cancellation).
+                pipelineParams.gen.should_cancel = [&req]() {
+                    return req.is_connection_closed && req.is_connection_closed();
+                };
 
                 if (low_latency_mode) {
                     if (!explicit_stream_stride && pipelineParams.stream_decode_stride_frames <= 0) {
@@ -869,6 +933,7 @@ namespace s2
                     }
                 );
 
+                pipelineParams.gen.should_cancel = nullptr;  // req is not valid on the worker thread
                 std::thread synth_thread([pipeline, pipelineParams, ref_audio, sink, server_busy,
                                           segment_sentences, segmented_texts, sentence_pause_ms]() mutable {
                     const bool ok = segment_sentences

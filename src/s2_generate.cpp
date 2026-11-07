@@ -95,6 +95,9 @@ GenerateResult generate(
     int32_t step = 0;
     const auto loop_t0 = std::chrono::steady_clock::now();
     while (main_token != im_end_id && step < params.max_new_tokens) {
+        if (params.should_cancel && params.should_cancel()) {
+            break;
+        }
 
         if (!ras_window.empty() &&
             std::find(ras_window.begin(), ras_window.end(), main_token) != ras_window.end() &&

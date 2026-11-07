@@ -29,6 +29,7 @@ struct GenerateParams {
     int32_t n_threads               = 0;
     bool    verbose                 = true;
     FrameCallback on_frame;
+    std::function<bool()> should_cancel;  // polled each step; true aborts generation
 };
 
 struct GenerateResult {

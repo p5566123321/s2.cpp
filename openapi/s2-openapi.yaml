@@ -207,6 +207,15 @@ paths:
                 badParamsJson:
                   value:
                     error: JSON parse error
+                blankText:
+                  value:
+                    error: Text must contain non-whitespace characters
+                paramOutOfRange:
+                  value:
+                    error: max_new_tokens must be in [1, 4096]
+                invalidVoiceId:
+                  value:
+                    error: Invalid voice id
                 invalidParamsType:
                   value:
                     error: "Invalid params JSON: [json.exception.type_error.302] type must be number, but is string"
@@ -216,6 +225,16 @@ paths:
               examples:
                 missingReferenceText:
                   value: "Reference audio requires reference_text (aliases: ref_text, prompt_text)."
+        '404':
+          description: The requested saved voice profile does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                voiceNotFound:
+                  value:
+                    error: "Voice profile not found: my_voice"
         '500':
           description: Synthesis failed after request validation and before the response body started.
           content:
